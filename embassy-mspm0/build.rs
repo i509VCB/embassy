@@ -56,6 +56,7 @@ fn generate_code() {
     g.extend(generate_pin());
     g.extend(generate_timers());
     g.extend(generate_interrupts());
+    g.extend(generate_interrupt_groups());
     g.extend(generate_peripheral_instances());
     g.extend(generate_pin_trait_impls());
 
@@ -151,6 +152,8 @@ fn get_singletons(cfgs: &mut common::CfgSet) -> Vec<Singleton> {
 
     for peripheral in METADATA.peripherals {
         // Some peripherals do not generate a singleton, but generate a singleton for each pin.
+        //
+        // But GPIO is special and enables some features.
         let skip_peripheral_singleton = match peripheral.kind {
             "gpio" => {
                 // Also enable ports that are present.
@@ -160,7 +163,7 @@ fn get_singletons(cfgs: &mut common::CfgSet) -> Vec<Singleton> {
                     _ => (),
                 }
 
-                true
+                false
             }
 
             // Each channel gets a singleton, handled separately.
@@ -447,6 +450,47 @@ fn generate_interrupts() -> TokenStream {
     }
 }
 
+fn generate_interrupt_groups() -> TokenStream {
+    let mut tokens = Vec::new();
+
+    for group in METADATA.interrupt_groups {
+        let group_name = Ident::new(group.name, Span::call_site());
+        let iidx = Literal::u32_unsuffixed(group.number);
+
+        tokens.push(quote! {
+            pub enum #group_name {}
+
+            unsafe impl crate::group::InterruptGroup for #group_name {
+                type Interrupt = crate::interrupt::typelevel::#group_name;
+            }
+
+            unsafe impl crate::group::SealedInterruptGroup for #group_name {
+                const IIDX: usize = #iidx;
+            }
+        });
+
+        for interrupt in group.interrupts {
+            let name = Ident::new(interrupt.name, Span::call_site());
+            let index = Literal::u32_unsuffixed(interrupt.number);
+
+            tokens.push(quote! {
+                pub enum #name {}
+
+                impl crate::sealed::Sealed for #name {}
+                impl crate::group::GroupInterrupt<#group_name> for #name {
+                    const INDEX: u8 = #index;
+                }
+            });
+        }
+    }
+
+    quote! {
+        pub mod groups {
+            #(#tokens)*
+        }
+    }
+}
+
 fn generate_peripheral_instances() -> TokenStream {
     let mut impls = Vec::<TokenStream>::new();
 
@@ -456,6 +500,7 @@ fn generate_peripheral_instances() -> TokenStream {
         // Will be filled in when uart implementation is finished
         let _ = peri;
         let tokens = match peripheral.kind {
+            "gpio" => Some(quote! { impl_gpio_instance!(#peri); }),
             "uart" => Some(quote! { impl_uart_instance!(#peri); }),
             _ => None,
         };

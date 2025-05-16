@@ -3,9 +3,18 @@
 
 use defmt::*;
 use embassy_executor::Spawner;
-use embassy_mspm0::gpio::{Input, Level, Output, Pull};
-use embassy_mspm0::Config;
+use embassy_mspm0::gpio::{self, Input, Level, Output, Pull};
+use embassy_mspm0::{bind_group, Config};
+use embassy_mspm0::peripherals::{GPIOA, GPIOB};
 use {defmt_rtt as _, panic_halt as _};
+
+bind_group! {
+    /// The GROUP1 handler.
+    pub struct Group1 for GROUP1 {
+        GPIOA => gpio::InterruptHandler<GPIOA>;
+        GPIOB => gpio::InterruptHandler<GPIOB>;
+    }
+}
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) -> ! {
@@ -18,7 +27,11 @@ async fn main(_spawner: Spawner) -> ! {
 
     let mut led1 = Output::new(led1, Level::Low);
 
-    let mut s2 = Input::new(s2, Pull::Up);
+    // FIXME: This allows GPIOA which is wrong.
+    //
+    // But putting an associated type for the instance the pin
+    // belongs to means `AnyPin` cannot be used here.
+    let mut s2 = Input::new::<GPIOB>(s2, Group1, Pull::Up);
 
     // led1 is active low
     led1.set_high();

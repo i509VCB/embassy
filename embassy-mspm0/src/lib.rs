@@ -13,6 +13,7 @@ pub(crate) mod fmt;
 // This must be declared early as well for
 mod macros;
 
+pub mod group;
 pub mod gpio;
 pub mod timer;
 pub mod uart;
@@ -40,12 +41,12 @@ pub mod mode {
 mod time_driver;
 
 // Interrupt group handlers.
-#[cfg_attr(mspm0c110x, path = "int_group/c110x.rs")]
-#[cfg_attr(mspm0g350x, path = "int_group/g350x.rs")]
-#[cfg_attr(mspm0g351x, path = "int_group/g351x.rs")]
-#[cfg_attr(mspm0l130x, path = "int_group/l130x.rs")]
-#[cfg_attr(mspm0l222x, path = "int_group/l222x.rs")]
-mod int_group;
+// #[cfg_attr(mspm0c110x, path = "int_group/c110x.rs")]
+// #[cfg_attr(mspm0g350x, path = "int_group/g350x.rs")]
+// #[cfg_attr(mspm0g351x, path = "int_group/g351x.rs")]
+// #[cfg_attr(mspm0l130x, path = "int_group/l130x.rs")]
+// #[cfg_attr(mspm0l222x, path = "int_group/l222x.rs")]
+// mod int_group;
 
 pub(crate) mod _generated {
     #![allow(dead_code)]
@@ -54,6 +55,124 @@ pub(crate) mod _generated {
     #![allow(missing_docs)]
 
     include!(concat!(env!("OUT_DIR"), "/_generated.rs"));
+}
+
+// FIXME: Update documentation
+/// Macro to bind interrupts to handlers.
+///
+/// This defines the right interrupt handlers, and creates a unit struct (like `struct Irqs;`)
+/// and implements the right [`Binding`]s for it. You can pass this struct to drivers to
+/// prove at compile-time that the right interrupts have been bound.
+///
+/// Example of how to bind one interrupt:
+///
+/// ```rust,ignore
+/// use embassy_mspm0::{bind_interrupts, peripherals};
+///
+/// bind_interrupts!(
+///     /// Binds the SPIM3 interrupt.
+///     struct Irqs {
+///         SPIM3 => spim::InterruptHandler<peripherals::SPI3>;
+///     }
+/// );
+/// ```
+///
+/// Example of how to bind multiple interrupts in a single macro invocation:
+///
+/// ```rust,ignore
+/// use embassy_nrf::{bind_interrupts, spim, twim, peripherals};
+///
+/// bind_interrupts!(struct Irqs {
+///     SPIM3 => spim::InterruptHandler<peripherals::SPI3>;
+///     TWISPI0 => twim::InterruptHandler<peripherals::TWISPI0>;
+/// });
+/// ```
+
+// developer note: this macro can't be in `embassy-hal-internal` due to the use of `$crate`.
+#[macro_export]
+macro_rules! bind_interrupts {
+    ($(#[$attr:meta])* $vis:vis struct $name:ident {
+        $(
+            $(#[cfg($cond_irq:meta)])?
+            $irq:ident => $(
+                $(#[cfg($cond_handler:meta)])?
+                $handler:ty
+            ),*;
+        )*
+    }) => {
+        #[derive(Copy, Clone)]
+        $(#[$attr])*
+        $vis struct $name;
+
+        $(
+            #[allow(non_snake_case)]
+            #[no_mangle]
+            $(#[cfg($cond_irq)])?
+            unsafe extern "C" fn $irq() {
+                $(
+                    $(#[cfg($cond_handler)])?
+                    <$handler as $crate::interrupt::typelevel::Handler<$crate::interrupt::typelevel::$irq>>::on_interrupt();
+                )*
+            }
+
+            $(#[cfg($cond_irq)])?
+            $crate::bind_interrupts!(@inner
+                $(
+                    $(#[cfg($cond_handler)])?
+                    unsafe impl $crate::interrupt::typelevel::Binding<$crate::interrupt::typelevel::$irq, $handler> for $name {}
+                )*
+            );
+        )*
+    };
+    (@inner $($t:tt)*) => {
+        $($t)*
+    }
+}
+
+#[macro_export]
+macro_rules! bind_group {
+    ($(#[$attr:meta])* $vis:vis struct $name: ident for $group: ident {
+        $($interrupt: ident => $handler: ty;)*
+    }) => {
+        #[derive(Copy, Clone)]
+        $(#[$attr])*
+        $vis struct $name;
+
+        impl $crate::interrupt::typelevel::Handler<<$crate::group::$group as $crate::group::InterruptGroup>::Interrupt> for $name {
+            unsafe fn on_interrupt() {
+                let Some(int) = <$crate::group::$group as $crate::group::InterruptGroup>::stat() else {
+                    // No interrupt is pending.
+                    return;
+                };
+
+                match int {
+                    $(
+                        <$crate::group::$interrupt as $crate::group::GroupInterrupt<$crate::group::$group>>::INDEX => {
+                            <$handler as $crate::group::Handler<$crate::group::$interrupt, $crate::group::$group>>::on_group_interrupt();
+                        }
+                    )*
+
+                    // Unhandled interrupt
+                    _ => ::core::unreachable!()
+                }
+            }
+        }
+
+        // Assert the bindings
+        $(
+            unsafe impl $crate::group::Binding<$crate::group::$interrupt, $crate::group::$group, $handler> for $name {}
+        )*
+
+        // Bind the interrupt.
+        const _: () = {
+            $crate::bind_interrupts! {
+                $(#[$attr])*
+                struct Group {
+                    $group => $name;
+                }
+            };
+        };
+    };
 }
 
 // Reexports
@@ -125,4 +244,8 @@ pub fn init(_config: Config) -> Peripherals {
 
         peripherals
     })
+}
+
+pub(crate) mod sealed {
+    pub trait Sealed {}
 }
