@@ -15,6 +15,7 @@ mod macros;
 pub mod adc;
 pub mod dma;
 pub mod gpio;
+pub mod group;
 // TODO: I2C unicomm
 #[cfg(not(unicomm))]
 pub mod i2c;
@@ -144,6 +145,32 @@ macro_rules! bind_interrupts {
     (@inner $($t:tt)*) => {
         $($t)*
     }
+}
+
+#[macro_export]
+macro_rules! bind_group_interrupts {
+    ($(#[$attr:meta])* $vis:vis struct $name:ident for $group:ident {
+        $(
+            $(#[cfg($cond_irq:meta)])?
+            $group_irq:ident => $(
+                $(#[cfg($cond_handler:meta)])?
+                $handler:ty
+            ),*;
+        )*
+    }) => {
+        #[derive(Copy, Clone)]
+        $(#[$attr])*
+        $vis struct $name;
+
+        impl $crate::group::GroupHandler<$crate::group::$group> for $name {
+            unsafe fn on_interrupt(iidx: u8) {
+                match iidx {
+                    // TODO: Safety comment
+                    _ => unsafe { ::core::hint::unreachable_unchecked() }
+                }
+            }
+        }
+    };
 }
 
 /// `embassy-mspm0` global configuration.

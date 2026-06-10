@@ -3,9 +3,18 @@
 
 use defmt::*;
 use embassy_executor::Spawner;
-use embassy_mspm0::Config;
+use embassy_mspm0::group::GroupInterruptHandler;
+use embassy_mspm0::{Config, bind_group_interrupts, bind_interrupts, group};
 use embassy_mspm0::gpio::{Input, Level, Output, Pull};
 use {defmt_rtt as _, panic_halt as _};
+
+bind_group_interrupts!(struct Group1Irqs for GROUP1 {
+    // GPIOA => gpio::GpioInterruptHandler<GPIOA>;
+});
+
+bind_interrupts!(struct Irqs {
+    GROUP1 => GroupInterruptHandler<group::GROUP1, Group1Irqs>;
+});
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) -> ! {
