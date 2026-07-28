@@ -654,11 +654,28 @@ fn generate_interrupts() -> TokenStream {
             }
         });
 
+    let interrupt_group_impls = METADATA
+        .interrupts
+        .iter()
+        .filter(|interrupt| interrupt.name.contains("GROUP"))
+        .map(|interrupt| {
+            let number: u8 = interrupt.name.strip_prefix("GROUP").unwrap().parse().unwrap();
+
+            let name = Ident::new(interrupt.name, Span::call_site());
+            let number = Literal::u8_unsuffixed(number);
+
+            quote! {
+                impl_interrupt_group!(#name, #number);
+            }
+        });
+
     // Generate interrupt enables for groups
     quote! {
         embassy_hal_internal::interrupt_mod! {
             #(#interrupts),*
         }
+
+        #(#interrupt_group_impls)*
 
         pub fn enable_group_interrupts(_cs: critical_section::CriticalSection) {
             use crate::interrupt::typelevel::Interrupt;

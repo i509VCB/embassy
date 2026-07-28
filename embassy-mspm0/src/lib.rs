@@ -20,6 +20,7 @@ pub mod gpio;
 pub mod i2c;
 #[cfg(not(unicomm))]
 pub mod i2c_target;
+pub mod interrupt_group;
 #[cfg(any(mspm0g150x, mspm0g151x, mspm0g350x, mspm0g351x))]
 pub mod mathacl;
 pub mod sysctl;
